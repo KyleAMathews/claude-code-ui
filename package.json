@@ -10,7 +10,8 @@
     "watch": "pnpm --filter @claude-code-ui/daemon watch",
     "watch:recent": "pnpm --filter @claude-code-ui/daemon watch:recent",
     "watch:active": "pnpm --filter @claude-code-ui/daemon watch:active",
-    "setup": "./packages/daemon/scripts/setup-hooks.sh"
+    "setup": "./packages/daemon/scripts/setup-hooks.sh",
+    "setup:windows": "powershell -ExecutionPolicy Bypass -File ./packages/daemon/scripts/setup-hooks.ps1"
   },
   "engines": {
     "node": ">=20.19.0"
