@@ -5,6 +5,7 @@
 
 import { DurableStreamTestServer } from "@durable-streams/server";
 import { DurableStream } from "@durable-streams/client";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { sessionsStateSchema, type Session, type RecentOutput, type PRInfo } from "./schema.js";
 import type { SessionState } from "./watcher.js";
 import type { LogEntry } from "./types.js";
@@ -13,6 +14,7 @@ import { queuePRCheck, getCachedPR, setOnPRUpdate, stopAllPolling, clearPRForSes
 import { log } from "./log.js";
 
 const DEFAULT_PORT = 4450;
+const API_PORT = 4451;
 const SESSIONS_STREAM_PATH = "/sessions";
 
 export interface StreamServerOptions {
@@ -21,14 +23,17 @@ export interface StreamServerOptions {
 
 export class StreamServer {
   private server: DurableStreamTestServer;
+  private apiServer: ReturnType<typeof createServer> | null = null;
   private stream: DurableStream | null = null;
   private port: number;
+  private apiPort: number;
   private streamUrl: string;
   // Track sessions for PR update callbacks
   private sessionCache = new Map<string, SessionState>();
 
   constructor(options: StreamServerOptions = {}) {
     this.port = options.port ?? DEFAULT_PORT;
+    this.apiPort = parseInt(process.env.API_PORT ?? String(API_PORT), 10);
 
     // Use in-memory storage during development (no dataDir = in-memory)
     this.server = new DurableStreamTestServer({
@@ -39,9 +44,75 @@ export class StreamServer {
     this.streamUrl = `http://127.0.0.1:${this.port}${SESSIONS_STREAM_PATH}`;
   }
 
+  /**
+   * Handle API requests for session details
+   */
+  private handleApiRequest(req: IncomingMessage, res: ServerResponse): void {
+    // CORS headers
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+    if (req.method === "OPTIONS") {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
+    const url = new URL(req.url || "/", `http://127.0.0.1:${this.apiPort}`);
+
+    // GET /api/sessions/:sessionId - get full session entries
+    const sessionMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)$/);
+    if (sessionMatch && req.method === "GET") {
+      const sessionId = sessionMatch[1];
+      const session = this.sessionCache.get(sessionId);
+
+      if (!session) {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Session not found" }));
+        return;
+      }
+
+      // Return full session with entries
+      const fullSession = {
+        sessionId: session.sessionId,
+        cwd: session.cwd,
+        gitBranch: session.gitBranch,
+        originalPrompt: session.originalPrompt,
+        status: session.status,
+        entries: session.entries.map(formatEntryForAPI),
+      };
+
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(fullSession));
+      return;
+    }
+
+    // GET /api/sessions - list all sessions
+    if (url.pathname === "/api/sessions" && req.method === "GET") {
+      const sessions = Array.from(this.sessionCache.keys());
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ sessions }));
+      return;
+    }
+
+    // 404 for unknown routes
+    res.writeHead(404, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Not found" }));
+  }
+
   async start(): Promise<void> {
     await this.server.start();
     log("Server", `Durable Streams server running on http://127.0.0.1:${this.port}`);
+
+    // Start API server for session details
+    this.apiServer = createServer((req, res) => this.handleApiRequest(req, res));
+    await new Promise<void>((resolve) => {
+      this.apiServer!.listen(this.apiPort, "127.0.0.1", () => {
+        log("Server", `API server running on http://127.0.0.1:${this.apiPort}`);
+        resolve();
+      });
+    });
 
     // Create or connect to the sessions stream
     try {
@@ -73,6 +144,10 @@ export class StreamServer {
   async stop(): Promise<void> {
     stopAllPolling();
     await this.server.stop();
+    if (this.apiServer) {
+      await new Promise<void>((resolve) => this.apiServer!.close(() => resolve()));
+      this.apiServer = null;
+    }
     this.stream = null;
   }
 
@@ -309,5 +384,70 @@ function extractPendingTool(session: SessionState): Session["pendingTool"] {
   }
 
   return null;
+}
+
+/**
+ * Format a log entry for the API response
+ * Simplifies and cleans up entries for the UI
+ */
+function formatEntryForAPI(entry: LogEntry): Record<string, unknown> {
+  if (entry.type === "user") {
+    const content = entry.message.content;
+    if (typeof content === "string") {
+      return {
+        type: "user",
+        content,
+        timestamp: entry.timestamp,
+      };
+    } else if (Array.isArray(content)) {
+      // Tool results
+      const toolResults = content
+        .filter((b) => b.type === "tool_result")
+        .map((b) => ({
+          toolUseId: (b as { tool_use_id: string }).tool_use_id,
+          content: (b as { content: string }).content?.slice(0, 2000),
+        }));
+      if (toolResults.length > 0) {
+        return {
+          type: "tool_result",
+          results: toolResults,
+          timestamp: entry.timestamp,
+        };
+      }
+    }
+    return { type: "user", content: "[unknown content]", timestamp: entry.timestamp };
+  }
+
+  if (entry.type === "assistant") {
+    const blocks = entry.message.content.map((block) => {
+      if (block.type === "text") {
+        return { type: "text", text: block.text };
+      }
+      if (block.type === "tool_use") {
+        return {
+          type: "tool_use",
+          id: block.id,
+          name: block.name,
+          input: block.input,
+        };
+      }
+      if (block.type === "thinking") {
+        return { type: "thinking", thinking: block.thinking };
+      }
+      return block;
+    });
+    return {
+      type: "assistant",
+      content: blocks,
+      timestamp: entry.timestamp,
+      model: entry.message.model,
+    };
+  }
+
+  // System entries, queue operations, etc.
+  return {
+    type: entry.type,
+    timestamp: "timestamp" in entry ? entry.timestamp : undefined,
+  };
 }
 

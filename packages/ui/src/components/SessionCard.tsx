@@ -17,6 +17,7 @@ import type { Session, CIStatus } from "../data/schema";
 interface SessionCardProps {
   session: Session;
   disableHover?: boolean;
+  onClick?: () => void;
 }
 
 const toolIcons: Record<string, string> = {
@@ -110,7 +111,7 @@ function getCIStatusColor(status: CIStatus): "green" | "red" | "yellow" | "gray"
   }
 }
 
-export function SessionCard({ session, disableHover }: SessionCardProps) {
+export function SessionCard({ session, disableHover, onClick }: SessionCardProps) {
   const showPendingTool = session.hasPendingToolUse && session.pendingTool;
   // Show path from ~ (e.g., ~/programs/project)
   const dirPath = session.cwd.replace(/^\/Users\/[^/]+/, "~");
@@ -118,7 +119,12 @@ export function SessionCard({ session, disableHover }: SessionCardProps) {
   return (
     <HoverCard.Root openDelay={750} open={disableHover ? false : undefined}>
       <HoverCard.Trigger>
-        <Card size="2" className={getCardClass(session)}>
+        <Card
+          size="2"
+          className={getCardClass(session)}
+          onClick={onClick}
+          style={{ cursor: onClick ? "pointer" : undefined }}
+        >
           <Flex direction="column" gap="4">
             {/* Header: directory and time */}
             <Flex justify="between" align="center">
