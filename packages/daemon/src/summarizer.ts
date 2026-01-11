@@ -11,8 +11,18 @@ import type { LogEntry } from "./types.js";
 
 // Lazy-load client to ensure env vars are loaded first
 let client: Anthropic | null = null;
-function getClient(): Anthropic {
+let apiEnabled = true;
+
+function getClient(): Anthropic | null {
+  if (!apiEnabled) {
+    return null;
+  }
   if (!client) {
+    if (!process.env.ANTHROPIC_API_KEY) {
+      console.log("[summarizer] No ANTHROPIC_API_KEY set - AI summaries disabled, using fallbacks");
+      apiEnabled = false;
+      return null;
+    }
     client = new Anthropic();
   }
   return client;
@@ -26,8 +36,13 @@ interface APITask {
 }
 
 async function processAPITask(task: APITask): Promise<void> {
+  const client = getClient();
+  if (!client) {
+    task.reject(new Error("API client not available"));
+    return;
+  }
   try {
-    const response = await getClient().messages.create(task.params);
+    const response = await client.messages.create(task.params);
     const text = response.content[0].type === "text"
       ? response.content[0].text.trim()
       : "";
@@ -119,6 +134,11 @@ export async function generateAISummary(session: SessionState): Promise<string> 
 
   if (status.status === "working") {
     return getWorkingSummary(session);
+  }
+
+  // If API is disabled, use fallback
+  if (!apiEnabled) {
+    return getFallbackSummary(session);
   }
 
   // Check cache
@@ -230,14 +250,17 @@ function getFallbackSummary(session: SessionState): string {
 export async function generateGoal(session: SessionState): Promise<string> {
   const { sessionId, originalPrompt, entries } = session;
 
+  // Trigger API check early to set apiEnabled flag
+  getClient();
+
   // Check cache - but regenerate if session has grown 5x since last generation
   const cached = goalCache.get(sessionId);
   if (cached && entries.length < cached.entryCount * 5) {
     return cached.goal;
   }
 
-  // For new sessions, use the original prompt
-  if (entries.length < 5) {
+  // For new sessions or when API disabled, use the original prompt
+  if (entries.length < 5 || !apiEnabled) {
     return cleanGoalText(originalPrompt);
   }
 

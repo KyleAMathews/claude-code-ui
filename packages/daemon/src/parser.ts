@@ -156,7 +156,8 @@ export function decodeProjectDir(encodedDir: string): string {
  * e.g., "~/.claude/projects/-Users-kyle/abc123.jsonl" -> "abc123"
  */
 export function extractSessionId(filepath: string): string {
-  const filename = filepath.split("/").pop() ?? "";
+  // Handle both Unix (/) and Windows (\) path separators
+  const filename = filepath.split(/[/\\]/).pop() ?? "";
   return filename.replace(".jsonl", "");
 }
 
@@ -165,7 +166,8 @@ export function extractSessionId(filepath: string): string {
  * e.g., "~/.claude/projects/-Users-kyle-code/abc123.jsonl" -> "-Users-kyle-code"
  */
 export function extractEncodedDir(filepath: string): string {
-  const parts = filepath.split("/");
+  // Handle both Unix (/) and Windows (\) path separators
+  const parts = filepath.split(/[/\\]/);
   // The encoded dir is the second-to-last part
   return parts[parts.length - 2] ?? "";
 }

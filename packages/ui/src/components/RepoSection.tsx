@@ -21,9 +21,10 @@ interface RepoSectionProps {
   repoUrl: string | null;
   sessions: Session[];
   activityScore: number;
+  onSessionClick?: (sessionId: string) => void;
 }
 
-export function RepoSection({ repoId, repoUrl, sessions, activityScore }: RepoSectionProps) {
+export function RepoSection({ repoId, repoUrl, sessions, activityScore, onSessionClick }: RepoSectionProps) {
   // Use effective status to categorize sessions (accounts for time-based idle)
   const working = sessions.filter((s) => getEffectiveStatus(s) === "working");
   const needsApproval = sessions.filter(
@@ -66,24 +67,28 @@ export function RepoSection({ repoId, repoUrl, sessions, activityScore }: RepoSe
           status="working"
           sessions={working}
           color="green"
+          onSessionClick={onSessionClick}
         />
         <KanbanColumn
           title="Needs Approval"
           status="needs-approval"
           sessions={needsApproval}
           color="orange"
+          onSessionClick={onSessionClick}
         />
         <KanbanColumn
           title="Waiting"
           status="waiting"
           sessions={waiting}
           color="yellow"
+          onSessionClick={onSessionClick}
         />
         <KanbanColumn
           title="Idle"
           status="idle"
           sessions={idle}
           color="gray"
+          onSessionClick={onSessionClick}
         />
       </Flex>
 

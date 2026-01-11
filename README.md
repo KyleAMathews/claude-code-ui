@@ -100,23 +100,37 @@ For older Claude Code versions or sessions without hooks:
 pnpm install
 ```
 
-### 2. Configure PermissionRequest hook (recommended)
+### 2. Configure hooks (recommended)
 
-For accurate "Needs Approval" detection, install the PermissionRequest hook:
+For accurate "Needs Approval" detection, install the hooks:
 
+**Linux/macOS:**
 ```bash
 pnpm run setup
 ```
 
-This adds a hook to `~/.claude/settings.json` that notifies the daemon when Claude Code is waiting for user permission. Without this hook, the daemon uses heuristics based on tool names which may be less accurate.
+**Windows (PowerShell):**
+```powershell
+pnpm run setup:windows
+```
 
-### 3. Set API key
+This adds hooks to `~/.claude/settings.json` that notify the daemon when Claude Code is waiting for user permission. Without these hooks, the daemon uses heuristics based on tool names which may be less accurate.
 
-The daemon needs an Anthropic API key for AI summaries:
+### 3. Set API key (optional)
 
+The daemon can use an Anthropic API key for AI-powered summaries:
+
+**Linux/macOS:**
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
+
+**Windows (PowerShell):**
+```powershell
+$env:ANTHROPIC_API_KEY="sk-ant-..."
+```
+
+> **Note:** The API key is optional. Without it, the daemon will use heuristic-based summaries (e.g., "Editing file.ts", "Running tests") instead of AI-generated ones.
 
 ### 4. Start the app
 
