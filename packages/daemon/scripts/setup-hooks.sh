@@ -45,15 +45,25 @@ STOP_HOOK="$SCRIPT_DIR/hooks/stop.sh"
 # SessionEnd: write session-ended signal
 SESSION_END_HOOK="$SCRIPT_DIR/hooks/session-end.sh"
 
-# Add all hooks
+# Add hooks by appending to existing arrays (preserving existing hooks)
 jq --arg prompt "$USER_PROMPT_HOOK" \
    --arg perm "$PERMISSION_HOOK" \
    --arg stop "$STOP_HOOK" \
-   --arg end "$SESSION_END_HOOK" '
-  .hooks.UserPromptSubmit = [{"matcher": "", "hooks": [{"type": "command", "command": $prompt}]}] |
-  .hooks.PermissionRequest = [{"matcher": "", "hooks": [{"type": "command", "command": $perm}]}] |
-  .hooks.Stop = [{"matcher": "", "hooks": [{"type": "command", "command": $stop}]}] |
-  .hooks.SessionEnd = [{"matcher": "", "hooks": [{"type": "command", "command": $end}]}]
+   --arg sessionend "$SESSION_END_HOOK" '
+  # Initialize hooks object if it doesn'\''t exist
+  if .hooks == null then .hooks = {} else . end |
+
+  # UserPromptSubmit: append to existing array or create new
+  .hooks.UserPromptSubmit = (.hooks.UserPromptSubmit // []) + [{"matcher": "", "hooks": [{"type": "command", "command": $prompt}]}] |
+
+  # PermissionRequest: append or create
+  .hooks.PermissionRequest = (.hooks.PermissionRequest // []) + [{"matcher": "", "hooks": [{"type": "command", "command": $perm}]}] |
+
+  # Stop: append or create
+  .hooks.Stop = (.hooks.Stop // []) + [{"matcher": "", "hooks": [{"type": "command", "command": $stop}]}] |
+
+  # SessionEnd: append or create
+  .hooks.SessionEnd = (.hooks.SessionEnd // []) + [{"matcher": "", "hooks": [{"type": "command", "command": $sessionend}]}]
 ' "$SETTINGS_FILE" > "$SETTINGS_FILE.tmp"
 mv "$SETTINGS_FILE.tmp" "$SETTINGS_FILE"
 
