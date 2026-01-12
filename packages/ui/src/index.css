@@ -92,3 +92,66 @@ body {
 .session-card:nth-child(3) { animation-delay: 100ms; }
 .session-card:nth-child(4) { animation-delay: 150ms; }
 .session-card:nth-child(5) { animation-delay: 200ms; }
+
+/* Responsive layout: Mobile vs Desktop */
+/* Mobile: < 1024px - Show list view */
+/* Desktop: >= 1024px - Show Kanban board */
+
+/* Default: Hide desktop, show mobile */
+.desktop-view {
+  display: none;
+}
+
+.mobile-view {
+  display: block;
+}
+
+/* Desktop breakpoint: >= 1024px */
+@media (min-width: 1024px) {
+  .desktop-view {
+    display: flex;
+  }
+
+  .mobile-view {
+    display: none;
+  }
+}
+
+/* Mobile-specific styles */
+.mobile-view {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.session-card-compact {
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.session-card-compact:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.session-card-compact:active {
+  transform: translateY(0);
+}
+
+/* Status filter chips */
+.status-filter {
+  padding: 4px 0;
+}
+
+/* Dropdown styling */
+.mobile-dropdown-trigger {
+  min-height: 44px;
+  font-size: 16px;
+}
+
+/* Touch-friendly minimum sizes */
+@media (max-width: 1023px) {
+  /* Ensure touch targets are at least 44x44px */
+  button, .session-card-compact {
+    min-height: 44px;
+  }
+}

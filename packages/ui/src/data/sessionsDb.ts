@@ -1,7 +1,9 @@
 import { createStreamDB, type StreamDB } from "@durable-streams/state";
 import { sessionsStateSchema } from "./schema";
 
-const STREAM_URL = "http://127.0.0.1:4450/sessions";
+// Use environment variable if set, otherwise construct from window.location
+const STREAM_URL = import.meta.env.VITE_STREAM_URL ??
+  `${window.location.protocol}//${window.location.hostname}:4450/sessions`;
 
 export type SessionsDB = StreamDB<typeof sessionsStateSchema>;
 
