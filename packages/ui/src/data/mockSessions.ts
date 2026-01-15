@@ -1,4 +1,4 @@
-import type { SessionStatus } from "./types";
+import type { SessionStatus, SessionSource } from "./types";
 
 export interface PendingTool {
   tool: "Edit" | "Write" | "Bash" | "Read" | "Grep" | "MultiEdit";
@@ -11,6 +11,7 @@ export interface MockSession {
   gitBranch: string | null;
   originalPrompt: string;
   status: SessionStatus;
+  source: SessionSource;
   lastActivityAt: string;
   messageCount: number;
   hasPendingToolUse: boolean;
@@ -32,6 +33,7 @@ export const mockSessions: MockSession[] = [
     gitBranch: "main",
     originalPrompt: "Scaffold the UI with Vite and TanStack Router",
     status: "working",
+    source: "claude",
     lastActivityAt: new Date(now - 15 * 1000).toISOString(),
     messageCount: 12,
     hasPendingToolUse: false,
@@ -46,6 +48,7 @@ export const mockSessions: MockSession[] = [
     gitBranch: "feature/radix-support",
     originalPrompt: "Add support for Radix UI themes integration",
     status: "working",
+    source: "droid",
     lastActivityAt: new Date(now - 8 * 1000).toISOString(),
     messageCount: 5,
     hasPendingToolUse: false,
@@ -62,6 +65,7 @@ export const mockSessions: MockSession[] = [
     gitBranch: "fix/streaming",
     originalPrompt: "Fix the streaming response handler to properly chunk data",
     status: "waiting",
+    source: "claude",
     lastActivityAt: new Date(now - 2 * minute).toISOString(),
     messageCount: 8,
     hasPendingToolUse: true,
@@ -76,6 +80,7 @@ export const mockSessions: MockSession[] = [
     gitBranch: "feat/kanban",
     originalPrompt: "Create the Kanban board component with drag and drop",
     status: "waiting",
+    source: "droid",
     lastActivityAt: new Date(now - 5 * minute).toISOString(),
     messageCount: 15,
     hasPendingToolUse: true,
@@ -92,6 +97,7 @@ export const mockSessions: MockSession[] = [
     gitBranch: "main",
     originalPrompt: "Implement the HTTP endpoint for stream subscriptions",
     status: "waiting",
+    source: "claude",
     lastActivityAt: new Date(now - 3 * minute).toISOString(),
     messageCount: 22,
     hasPendingToolUse: false,
@@ -108,6 +114,7 @@ export const mockSessions: MockSession[] = [
     gitBranch: "experiment/old",
     originalPrompt: "Experiment with different state management approaches",
     status: "idle",
+    source: "claude",
     lastActivityAt: new Date(now - 2 * hour).toISOString(),
     messageCount: 45,
     hasPendingToolUse: false,
@@ -122,6 +129,7 @@ export const mockSessions: MockSession[] = [
     gitBranch: "post/ai-coding",
     originalPrompt: "Write a blog post about AI-assisted coding workflows",
     status: "idle",
+    source: "droid",
     lastActivityAt: new Date(now - 6 * hour).toISOString(),
     messageCount: 30,
     hasPendingToolUse: false,
@@ -138,6 +146,7 @@ export const mockSessions: MockSession[] = [
     gitBranch: null,
     originalPrompt: "Help me organize my project notes",
     status: "waiting",
+    source: "claude",
     lastActivityAt: new Date(now - 10 * minute).toISOString(),
     messageCount: 8,
     hasPendingToolUse: false,
@@ -152,6 +161,7 @@ export const mockSessions: MockSession[] = [
     gitBranch: "main",
     originalPrompt: "Create a bash script to clean up docker images",
     status: "idle",
+    source: "droid",
     lastActivityAt: new Date(now - 1 * hour).toISOString(),
     messageCount: 4,
     hasPendingToolUse: false,

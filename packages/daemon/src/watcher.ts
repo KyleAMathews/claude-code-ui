@@ -4,17 +4,22 @@ import { readFile, unlink, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import {
   tailJSONL,
+  tailDroidJSONL,
   extractMetadata,
+  extractDroidMetadata,
   extractSessionId,
   extractEncodedDir,
+  detectSource,
+  type DroidTailResult,
 } from "./parser.js";
 import { deriveStatus, statusChanged } from "./status.js";
 import { getGitInfoCached, type GitInfo } from "./git.js";
-import type { LogEntry, SessionMetadata, StatusResult } from "./types.js";
+import type { LogEntry, SessionMetadata, StatusResult, SessionSource } from "./types.js";
 import { log } from "./log.js";
 
 const CLAUDE_PROJECTS_DIR = `${process.env.HOME}/.claude/projects`;
-const SIGNALS_DIR = `${process.env.HOME}/.claude/session-signals`;
+const CLAUDE_SIGNALS_DIR = `${process.env.HOME}/.claude/session-signals`;
+const DROID_SESSIONS_DIR = `${process.env.HOME}/.factory/sessions`;
 
 export interface PendingPermission {
   session_id: string;
@@ -49,6 +54,8 @@ export interface SessionState {
   status: StatusResult;
   entries: LogEntry[];
   bytePosition: number;
+  // Session source - which CLI tool created this session
+  source: SessionSource;
   // GitHub repo info
   gitRepoUrl: string | null;   // https://github.com/owner/repo
   gitRepoId: string | null;    // owner/repo (for grouping)
@@ -62,6 +69,8 @@ export interface SessionState {
   hasStopSignal?: boolean;
   // True when SessionEnd hook has fired (session closed)
   hasEndedSignal?: boolean;
+  // Droid-specific metadata (cached from session_start entry)
+  droidMetadata?: DroidTailResult["droidMetadata"];
 }
 
 export interface SessionEvent {
@@ -71,7 +80,8 @@ export interface SessionEvent {
 }
 
 export class SessionWatcher extends EventEmitter {
-  private watcher: FSWatcher | null = null;
+  private claudeWatcher: FSWatcher | null = null;
+  private droidWatcher: FSWatcher | null = null;
   private signalWatcher: FSWatcher | null = null;
   private sessions = new Map<string, SessionState>();
   private pendingPermissions = new Map<string, PendingPermission>();
@@ -123,19 +133,20 @@ export class SessionWatcher extends EventEmitter {
   }
 
   async start(): Promise<void> {
+    // Watch Claude Code sessions directory
     // Use directory watching instead of glob - chokidar has issues with
     // directories that start with dashes when using glob patterns
-    this.watcher = watch(CLAUDE_PROJECTS_DIR, {
+    this.claudeWatcher = watch(CLAUDE_PROJECTS_DIR, {
       ignored: /agent-.*\.jsonl$/,  // Ignore agent sub-session files
       persistent: true,
       ignoreInitial: false,
       depth: 2,
     });
 
-    this.watcher
+    this.claudeWatcher
       .on("add", (path) => {
         if (!path.endsWith(".jsonl")) return;
-        log("Watcher", `New file detected: ${path.split("/").slice(-2).join("/")}`);
+        log("Watcher", `[Claude] New file detected: ${path.split("/").slice(-2).join("/")}`);
         this.handleFile(path, "add");
       })
       .on("change", (path) => {
@@ -145,8 +156,32 @@ export class SessionWatcher extends EventEmitter {
       .on("unlink", (path) => this.handleDelete(path))
       .on("error", (error) => this.emit("error", error));
 
+    // Watch Droid (Factory) sessions directory
+    this.droidWatcher = watch(DROID_SESSIONS_DIR, {
+      ignored: [/agent-.*\.jsonl$/, /\.settings\.json$/],  // Ignore agent sub-sessions and settings files
+      persistent: true,
+      ignoreInitial: false,
+      depth: 2,
+    });
+
+    this.droidWatcher
+      .on("add", (path) => {
+        if (!path.endsWith(".jsonl")) return;
+        log("Watcher", `[Droid] New file detected: ${path.split("/").slice(-2).join("/")}`);
+        this.handleFile(path, "add");
+      })
+      .on("change", (path) => {
+        if (!path.endsWith(".jsonl")) return;
+        this.debouncedHandleFile(path);
+      })
+      .on("unlink", (path) => this.handleDelete(path))
+      .on("error", () => {
+        // Ignore errors - directory may not exist if Droid isn't installed
+      });
+
     // Watch signals directory for hook output (permission, stop, session-end)
-    this.signalWatcher = watch(SIGNALS_DIR, {
+    // Currently only Claude Code uses this, Droid may have its own mechanism
+    this.signalWatcher = watch(CLAUDE_SIGNALS_DIR, {
       persistent: true,
       ignoreInitial: false,
       depth: 0,
@@ -169,10 +204,15 @@ export class SessionWatcher extends EventEmitter {
         // Ignore errors - directory may not exist if hooks aren't set up
       });
 
-    // Wait for initial scan to complete
-    await new Promise<void>((resolve) => {
-      this.watcher!.on("ready", resolve);
-    });
+    // Wait for initial scan to complete for both watchers
+    await Promise.all([
+      new Promise<void>((resolve) => {
+        this.claudeWatcher!.on("ready", resolve);
+      }),
+      new Promise<void>((resolve) => {
+        this.droidWatcher!.on("ready", resolve);
+      }),
+    ]);
 
     // Load any existing signal files
     await this.loadExistingSignals();
@@ -189,10 +229,10 @@ export class SessionWatcher extends EventEmitter {
    */
   private async loadExistingSignals(): Promise<void> {
     try {
-      const files = await readdir(SIGNALS_DIR);
+      const files = await readdir(CLAUDE_SIGNALS_DIR);
       for (const file of files) {
         if (file.endsWith(".json")) {
-          await this.handleSignalFile(join(SIGNALS_DIR, file));
+          await this.handleSignalFile(join(CLAUDE_SIGNALS_DIR, file));
         }
       }
     } catch {
@@ -354,9 +394,14 @@ export class SessionWatcher extends EventEmitter {
   }
 
   stop(): void {
-    if (this.watcher) {
-      this.watcher.close();
-      this.watcher = null;
+    if (this.claudeWatcher) {
+      this.claudeWatcher.close();
+      this.claudeWatcher = null;
+    }
+
+    if (this.droidWatcher) {
+      this.droidWatcher.close();
+      this.droidWatcher = null;
     }
 
     if (this.signalWatcher) {
@@ -387,7 +432,7 @@ export class SessionWatcher extends EventEmitter {
 
     // Try to delete the file
     try {
-      await unlink(join(SIGNALS_DIR, `${sessionId}.permission.json`));
+      await unlink(join(CLAUDE_SIGNALS_DIR, `${sessionId}.permission.json`));
     } catch {
       // File may already be deleted
     }
@@ -402,7 +447,7 @@ export class SessionWatcher extends EventEmitter {
     this.stopSignals.delete(sessionId);
 
     try {
-      await unlink(join(SIGNALS_DIR, `${sessionId}.stop.json`));
+      await unlink(join(CLAUDE_SIGNALS_DIR, `${sessionId}.stop.json`));
     } catch {
       // File may already be deleted
     }
@@ -464,17 +509,28 @@ export class SessionWatcher extends EventEmitter {
     try {
       const sessionId = extractSessionId(filepath);
       const existingSession = this.sessions.get(sessionId);
+      const source = detectSource(filepath);
 
       // Determine starting byte position
       const fromByte = existingSession?.bytePosition ?? 0;
 
-      // Read new entries
-      const { entries: newEntries, newPosition } = await tailJSONL(
-        filepath,
-        fromByte
-      );
+      // Read new entries - use source-specific parser
+      let newEntries: LogEntry[];
+      let newPosition: number;
+      let droidMetadata: DroidTailResult["droidMetadata"] | undefined;
 
-      if (newEntries.length === 0 && existingSession) {
+      if (source === "droid") {
+        const result = await tailDroidJSONL(filepath, fromByte);
+        newEntries = result.entries;
+        newPosition = result.newPosition;
+        droidMetadata = result.droidMetadata ?? existingSession?.droidMetadata;
+      } else {
+        const result = await tailJSONL(filepath, fromByte);
+        newEntries = result.entries;
+        newPosition = result.newPosition;
+      }
+
+      if (newEntries.length === 0 && existingSession && !droidMetadata) {
         // No new data
         return;
       }
@@ -504,9 +560,14 @@ export class SessionWatcher extends EventEmitter {
           isGitRepo: existingSession.gitRepoUrl !== null || existingSession.gitBranch !== null,
         };
       } else {
-        metadata = extractMetadata(allEntries);
-        if (!metadata) {
-          // Not enough data yet
+        // Use source-specific metadata extraction
+        if (source === "droid") {
+          metadata = extractDroidMetadata(allEntries, droidMetadata);
+        } else {
+          metadata = extractMetadata(allEntries);
+        }
+        if (!metadata || !metadata.cwd) {
+          // Not enough data yet - either no metadata or cwd is missing
           return;
         }
         // Look up git info for new sessions
@@ -558,6 +619,7 @@ export class SessionWatcher extends EventEmitter {
       const previousStatus = existingSession?.status;
 
       // Hook signals are authoritative for status - override JSONL-derived status
+      // Note: Currently only Claude Code uses signal files, Droid sessions use JSONL-derived status
       const pendingPermission = this.pendingPermissions.get(sessionId);
       const hasWorkingSig = this.workingSignals.has(sessionId);
       const hasStopSig = this.stopSignals.has(sessionId);
@@ -590,6 +652,7 @@ export class SessionWatcher extends EventEmitter {
         status,
         entries: allEntries,
         bytePosition: newPosition,
+        source,
         gitRepoUrl: gitInfo.repoUrl,
         gitRepoId: gitInfo.repoId,
         branchChanged,
@@ -597,6 +660,7 @@ export class SessionWatcher extends EventEmitter {
         hasWorkingSignal: hasWorkingSig,
         hasStopSignal: hasStopSig,
         hasEndedSignal: hasEndedSig,
+        droidMetadata,
       };
 
       // Store session
