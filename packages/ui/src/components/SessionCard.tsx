@@ -110,6 +110,22 @@ function getCIStatusColor(status: CIStatus): "green" | "red" | "yellow" | "gray"
   }
 }
 
+function getSourceBadge(source: Session["source"]) {
+  if (source === "droid") {
+    return (
+      <Badge color="blue" variant="soft" size="1" title="Factory Droid">
+        🤖 Droid
+      </Badge>
+    );
+  }
+  // Claude is default, show a subtle indicator
+  return (
+    <Badge color="purple" variant="soft" size="1" title="Claude Code">
+      ✨ Claude
+    </Badge>
+  );
+}
+
 export function SessionCard({ session, disableHover }: SessionCardProps) {
   const showPendingTool = session.hasPendingToolUse && session.pendingTool;
   // Show path from ~ (e.g., ~/programs/project)
@@ -120,11 +136,14 @@ export function SessionCard({ session, disableHover }: SessionCardProps) {
       <HoverCard.Trigger>
         <Card size="2" className={getCardClass(session)}>
           <Flex direction="column" gap="4">
-            {/* Header: directory and time */}
+            {/* Header: directory, source, and time */}
             <Flex justify="between" align="center">
-              <Text size="1" color="gray" style={{ fontFamily: "var(--code-font-family)" }}>
-                {dirPath}
-              </Text>
+              <Flex align="center" gap="2">
+                <Text size="1" color="gray" style={{ fontFamily: "var(--code-font-family)" }}>
+                  {dirPath}
+                </Text>
+                {getSourceBadge(session.source)}
+              </Flex>
               <Text size="1" color="gray">
                 {formatTimeAgo(session.lastActivityAt)}
               </Text>

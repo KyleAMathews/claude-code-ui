@@ -1,4 +1,7 @@
-// Log entry types based on actual Claude Code session logs
+// Log entry types based on actual Claude Code and Droid session logs
+
+// Session source - which CLI tool created the session
+export type SessionSource = "claude" | "droid";
 
 export type LogEntry =
   | UserEntry
@@ -6,6 +9,49 @@ export type LogEntry =
   | SystemEntry
   | QueueOperationEntry
   | FileHistorySnapshotEntry;
+
+// Droid-specific entry types (from ~/.factory/sessions/)
+export interface DroidSessionStartEntry {
+  type: "session_start";
+  id: string;
+  title: string;
+  sessionTitle?: string;
+  owner?: string;
+  version?: number;
+  cwd: string;
+}
+
+export interface DroidMessageEntry {
+  type: "message";
+  id: string;
+  timestamp: string;
+  message: {
+    role: "user" | "assistant";
+    content: DroidContentBlock[] | string;
+  };
+  parentId?: string;
+}
+
+export interface DroidTodoStateEntry {
+  type: "todo_state";
+  id: string;
+  timestamp: string;
+  todos: {
+    todos: string;
+  };
+  messageIndex: number;
+}
+
+export type DroidContentBlock =
+  | TextBlock
+  | ToolUseBlock
+  | ToolResultBlock
+  | ThinkingBlock;
+
+export type DroidLogEntry =
+  | DroidSessionStartEntry
+  | DroidMessageEntry
+  | DroidTodoStateEntry;
 
 // Common fields on message entries
 export interface BaseMessageEntry {

@@ -3,8 +3,21 @@ import type {
   LogEntry,
   SessionMetadata,
   UserEntry,
-  isUserEntry,
+  SessionSource,
+  DroidLogEntry,
+  DroidSessionStartEntry,
+  DroidMessageEntry,
 } from "./types.js";
+
+/**
+ * Detect the session source based on the filepath.
+ */
+export function detectSource(filepath: string): SessionSource {
+  if (filepath.includes("/.claude/")) return "claude";
+  if (filepath.includes("/.factory/")) return "droid";
+  // Default to claude for backward compatibility
+  return "claude";
+}
 
 export interface TailResult {
   entries: LogEntry[];
@@ -168,4 +181,220 @@ export function extractEncodedDir(filepath: string): string {
   const parts = filepath.split("/");
   // The encoded dir is the second-to-last part
   return parts[parts.length - 2] ?? "";
+}
+
+// ============================================================================
+// Droid-specific parsing functions
+// ============================================================================
+
+export interface DroidTailResult {
+  entries: LogEntry[];
+  newPosition: number;
+  hadPartialLine: boolean;
+  droidMetadata?: {
+    sessionId: string;
+    cwd: string;
+    title: string;
+  };
+}
+
+/**
+ * Incrementally read new JSONL entries from a Droid session file.
+ * Converts Droid entries to the common LogEntry format.
+ */
+export async function tailDroidJSONL(
+  filepath: string,
+  fromByte: number = 0
+): Promise<DroidTailResult> {
+  const handle = await open(filepath, "r");
+
+  try {
+    const fileStat = await stat(filepath);
+
+    if (fromByte >= fileStat.size) {
+      return { entries: [], newPosition: fromByte, hadPartialLine: false };
+    }
+
+    const buffer = Buffer.alloc(fileStat.size - fromByte);
+    await handle.read(buffer, 0, buffer.length, fromByte);
+
+    const content = buffer.toString("utf8");
+    const lines = content.split("\n");
+
+    const entries: LogEntry[] = [];
+    let bytesConsumed = 0;
+    let hadPartialLine = false;
+    let droidMetadata: DroidTailResult["droidMetadata"];
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const isLastLine = i === lines.length - 1;
+      const lineBytes = Buffer.byteLength(line, "utf8");
+
+      // Last line might be partial if file doesn't end with newline
+      if (isLastLine && !content.endsWith("\n") && line.length > 0) {
+        hadPartialLine = true;
+        break;
+      }
+
+      // Skip empty lines
+      if (!line.trim()) {
+        bytesConsumed += lineBytes + (isLastLine ? 0 : 1);
+        continue;
+      }
+
+      // Skip lines that don't look like JSON objects
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("{")) {
+        bytesConsumed += lineBytes + 1;
+        continue;
+      }
+
+      try {
+        const rawEntry = JSON.parse(line) as DroidLogEntry;
+        
+        // Handle session_start - extract metadata
+        if (rawEntry.type === "session_start") {
+          const startEntry = rawEntry as DroidSessionStartEntry;
+          droidMetadata = {
+            sessionId: startEntry.id,
+            cwd: startEntry.cwd,
+            title: startEntry.title,
+          };
+          bytesConsumed += lineBytes + 1;
+          continue;
+        }
+
+        // Handle message entries - convert to common format
+        if (rawEntry.type === "message") {
+          const msgEntry = rawEntry as DroidMessageEntry;
+          const converted = convertDroidMessageToLogEntry(msgEntry);
+          if (converted) {
+            entries.push(converted);
+          }
+        }
+
+        // Skip todo_state and other entry types
+        bytesConsumed += lineBytes + 1;
+      } catch {
+        // Malformed JSON - skip silently
+        bytesConsumed += lineBytes + 1;
+      }
+    }
+
+    return {
+      entries,
+      newPosition: fromByte + bytesConsumed,
+      hadPartialLine,
+      droidMetadata,
+    };
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * Convert a Droid message entry to the common LogEntry format.
+ */
+function convertDroidMessageToLogEntry(entry: DroidMessageEntry): LogEntry | null {
+  const { message, id, timestamp, parentId } = entry;
+
+  if (message.role === "user") {
+    // Convert to UserEntry
+    // Droid message content is compatible with Claude's UserEntry content
+    const content = message.content;
+    const userEntry: UserEntry = {
+      type: "user",
+      parentUuid: parentId ?? null,
+      uuid: id,
+      sessionId: "", // Will be filled in from metadata
+      timestamp,
+      cwd: "", // Will be filled in from metadata
+      version: "",
+      gitBranch: "",
+      isSidechain: false,
+      userType: "external",
+      message: {
+        role: "user",
+        content: content as string | import("./types.js").UserContentBlock[],
+      },
+    };
+    return userEntry;
+  }
+
+  if (message.role === "assistant") {
+    // Convert to AssistantEntry
+    // Droid uses the same content block format as Claude
+    const content = Array.isArray(message.content) ? message.content : [];
+    
+    return {
+      type: "assistant",
+      parentUuid: parentId ?? null,
+      uuid: id,
+      sessionId: "", // Will be filled in from metadata
+      timestamp,
+      cwd: "", // Will be filled in from metadata
+      version: "",
+      gitBranch: "",
+      isSidechain: false,
+      userType: "external",
+      requestId: "",
+      message: {
+        role: "assistant",
+        model: "",
+        id: id,
+        content: content as any, // Content blocks are compatible
+        stop_reason: null,
+      },
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Extract session metadata from Droid log entries.
+ * Uses the session_start entry for cwd/sessionId, and first user message for prompt.
+ */
+export function extractDroidMetadata(
+  entries: LogEntry[],
+  droidMeta?: DroidTailResult["droidMetadata"]
+): SessionMetadata | null {
+  if (!droidMeta) return null;
+
+  let originalPrompt: string | undefined;
+  let startedAt: string | undefined;
+
+  for (const entry of entries) {
+    if ("timestamp" in entry && entry.timestamp && !startedAt) {
+      startedAt = entry.timestamp;
+    }
+
+    // Get original prompt from first user message (not tool result)
+    if (entry.type === "user" && !originalPrompt) {
+      const content = entry.message.content;
+      if (typeof content === "string") {
+        originalPrompt =
+          content.length > 300 ? content.slice(0, 300) + "..." : content;
+      } else if (Array.isArray(content)) {
+        // Look for text block in content array
+        const textBlock = content.find((block) => block.type === "text");
+        if (textBlock && "text" in textBlock) {
+          const text = textBlock.text;
+          originalPrompt =
+            text.length > 300 ? text.slice(0, 300) + "..." : text;
+        }
+      }
+    }
+
+    if (originalPrompt && startedAt) break;
+  }
+
+  return {
+    sessionId: droidMeta.sessionId,
+    cwd: droidMeta.cwd,
+    gitBranch: null, // Droid doesn't store branch in session_start
+    originalPrompt: originalPrompt ?? droidMeta.title ?? "(no prompt found)",
+    startedAt: startedAt ?? new Date().toISOString(),
+  };
 }
