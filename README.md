@@ -1,32 +1,45 @@
-# Claude Code Session Tracker
+# AI Coding Session Tracker
 
-A real-time dashboard for monitoring Claude Code sessions across multiple projects. See what Claude is working on, which sessions need approval, and track PR/CI status.
+A real-time dashboard for monitoring AI coding sessions from **Claude Code** and **Factory Droid** across multiple projects. See what your AI assistants are working on, which sessions need approval, and track PR/CI status.
 
 ## Features
 
+- **Multi-tool support** - Monitor both Claude Code and Factory Droid sessions
 - **Real-time updates** via Durable Streams
 - **Kanban board** showing sessions by status (Working, Needs Approval, Waiting, Idle)
 - **AI-powered summaries** of session activity using Claude Sonnet
 - **PR & CI tracking** - see associated PRs and their CI status
 - **Multi-repo support** - sessions grouped by GitHub repository
+- **Source identification** - Visual badges distinguish Claude (✨) from Droid (🤖) sessions
 
 https://github.com/user-attachments/assets/877a43af-25f9-4751-88eb-24e7bbda68da
+
+## Supported Tools
+
+| Tool | Session Location | Status |
+|------|------------------|--------|
+| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | `~/.claude/projects/` | ✅ Full support |
+| [Factory Droid](https://docs.factory.ai/cli) | `~/.factory/sessions/` | ✅ Full support |
 
 ## Architecture
 
 ```
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│  Claude Code    │     │     Daemon      │     │       UI        │
-│   Sessions      │────▶│   (Watcher)     │────▶│   (React)       │
-│  ~/.claude/     │     │                 │     │                 │
-│   projects/     │     │  Durable Stream │     │  TanStack DB    │
+│  Claude Code    │     │                 │     │                 │
+│  ~/.claude/     │────▶│     Daemon      │     │       UI        │
+│   projects/     │     │   (Watcher)     │────▶│   (React)       │
+├─────────────────┤     │                 │     │                 │
+│  Factory Droid  │────▶│  Durable Stream │     │  TanStack DB    │
+│  ~/.factory/    │     │                 │     │                 │
+│   sessions/     │     │                 │     │                 │
 └─────────────────┘     └─────────────────┘     └─────────────────┘
 ```
 
 ### Daemon (`packages/daemon`)
 
-Watches `~/.claude/projects/` for session log changes and:
-- Parses JSONL log files incrementally
+Watches both `~/.claude/projects/` and `~/.factory/sessions/` for session log changes and:
+- Parses JSONL log files incrementally (handles both Claude and Droid formats)
+- Normalizes different log formats to a common internal structure
 - Derives session status using XState state machine
 - Generates AI summaries via Claude Sonnet API
 - Detects git branches and polls for PR/CI status
