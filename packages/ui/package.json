@@ -24,6 +24,7 @@
     "react-markdown": "^10.1.0",
     "react-syntax-highlighter": "^16.1.0",
     "remark-gfm": "^4.0.1",
+    "tone": "^15.1.22",
     "zod": "^4.3.5"
   },
   "devDependencies": {
