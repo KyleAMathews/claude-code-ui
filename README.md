@@ -110,15 +110,7 @@ pnpm run setup
 
 This adds a hook to `~/.claude/settings.json` that notifies the daemon when Claude Code is waiting for user permission. Without this hook, the daemon uses heuristics based on tool names which may be less accurate.
 
-### 3. Set API key
-
-The daemon needs an Anthropic API key for AI summaries:
-
-```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-```
-
-### 4. Start the app
+### 3. Start the app
 
 ```bash
 pnpm start
