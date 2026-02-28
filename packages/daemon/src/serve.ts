@@ -63,8 +63,12 @@ async function main(): Promise<void> {
   console.log(`Stream URL: ${colors.cyan}${streamServer.getStreamUrl()}${colors.reset}`);
   console.log();
 
-  // Start the session watcher
-  const watcher = new SessionWatcher({ debounceMs: 300 });
+  // Start the session watcher (only load recent sessions to avoid OOM)
+  const watcher = new SessionWatcher({
+    debounceMs: 300,
+    maxAgeMs: MAX_AGE_MS,
+    maxEntriesPerSession: 200,
+  });
 
   watcher.on("session", async (event: SessionEvent) => {
     const { type, session } = event;
