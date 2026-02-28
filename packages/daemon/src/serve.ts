@@ -25,6 +25,7 @@ for (const envPath of envPaths) {
 import { SessionWatcher, type SessionEvent, type SessionState } from "./watcher.js";
 import { StreamServer } from "./server.js";
 import { formatStatus } from "./status.js";
+import { metadataStore } from "./metadata.js";
 
 const PORT = parseInt(process.env.PORT ?? "4450", 10);
 const MAX_AGE_HOURS = parseInt(process.env.MAX_AGE_HOURS ?? "24", 10);
@@ -104,9 +105,13 @@ async function main(): Promise<void> {
     console.log();
     console.log(`${colors.dim}Shutting down...${colors.reset}`);
     watcher.stop();
+    metadataStore.stop();
     await streamServer.stop();
     process.exit(0);
   });
+
+  // Start metadata watcher
+  await metadataStore.start();
 
   // Start watching
   await watcher.start();

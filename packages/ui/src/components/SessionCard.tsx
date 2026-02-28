@@ -151,6 +151,35 @@ export function SessionCard({ session, disableHover }: SessionCardProps) {
               </Text>
             )}
 
+            {/* Metadata: source badge, cost, remote-control link */}
+            {session.metadata && (
+              <Flex align="center" gap="2" wrap="wrap">
+                {session.metadata.source && (
+                  <Badge color="violet" variant="soft" size="1">
+                    {session.metadata.source}
+                  </Badge>
+                )}
+                {session.metadata.costUsd != null && (
+                  <Text size="1" color="gray">
+                    ${session.metadata.costUsd.toFixed(2)}
+                  </Text>
+                )}
+                {session.metadata.remoteControlUrl && (
+                  <a
+                    href={session.metadata.remoteControlUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    style={{ textDecoration: "none" }}
+                  >
+                    <Badge color="blue" variant="soft" size="1">
+                      Connect
+                    </Badge>
+                  </a>
+                )}
+              </Flex>
+            )}
+
             {/* Footer: branch/PR info and message count */}
             <Flex align="center" justify="between" gap="2">
               <Flex align="center" gap="2">

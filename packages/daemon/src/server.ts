@@ -10,6 +10,7 @@ import type { SessionState } from "./watcher.js";
 import type { LogEntry } from "./types.js";
 import { generateAISummary, generateGoal } from "./summarizer.js";
 import { queuePRCheck, getCachedPR, setOnPRUpdate, stopAllPolling, clearPRForSession } from "./github.js";
+import { metadataStore } from "./metadata.js";
 import { log } from "./log.js";
 
 const DEFAULT_PORT = 4450;
@@ -136,6 +137,7 @@ export class StreamServer {
       summary,
       recentOutput: extractRecentOutput(sessionState.entries),
       pr,
+      metadata: metadataStore.get(sessionState.sessionId),
     };
 
     // Create the event using the schema helpers
@@ -184,6 +186,7 @@ export class StreamServer {
       summary,
       recentOutput: extractRecentOutput(sessionState.entries),
       pr,
+      metadata: metadataStore.get(sessionState.sessionId),
     };
 
     const event = sessionsStateSchema.sessions.update({ value: session });

@@ -38,6 +38,14 @@ export const PRInfoSchema = z.object({
 });
 export type PRInfo = z.infer<typeof PRInfoSchema>;
 
+// External metadata (pushed by home-server or other tools)
+export const SessionMetadataSchema = z.object({
+  source: z.string().optional(),
+  costUsd: z.number().optional(),
+  remoteControlUrl: z.string().optional(),
+}).optional();
+export type SessionMetadata = z.infer<typeof SessionMetadataSchema>;
+
 // Main session state schema
 export const SessionSchema = z.object({
   sessionId: z.string(),
@@ -51,10 +59,11 @@ export const SessionSchema = z.object({
   messageCount: z.number(),
   hasPendingToolUse: z.boolean(),
   pendingTool: PendingToolSchema.nullable(),
-  goal: z.string(), // High-level goal of the session
-  summary: z.string(), // Current activity summary
+  goal: z.string(),
+  summary: z.string(),
   recentOutput: z.array(RecentOutputSchema),
-  pr: PRInfoSchema.nullable(), // Associated PR if branch has one
+  pr: PRInfoSchema.nullable(),
+  metadata: SessionMetadataSchema,
 });
 export type Session = z.infer<typeof SessionSchema>;
 
