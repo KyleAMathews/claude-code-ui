@@ -70,6 +70,10 @@ async function main(): Promise<void> {
     maxEntriesPerSession: 200,
   });
 
+  // Track initial load phase — skip AI summarization for bulk "created" events
+  let initialLoadComplete = false;
+  const publishedSessions = new Set<string>();
+
   watcher.on("session", async (event: SessionEvent) => {
     const { type, session } = event;
 
@@ -94,7 +98,14 @@ async function main(): Promise<void> {
     // Publish to stream
     try {
       const operation = type === "created" ? "insert" : type === "deleted" ? "delete" : "update";
-      await streamServer.publishSession(session, operation);
+      // During initial load, skip AI for new sessions (use fast fallback summaries)
+      const skipAI = !initialLoadComplete && type === "created";
+      // Avoid re-publishing sessions already in the initial batch
+      if (type === "created" && publishedSessions.has(session.sessionId)) {
+        return;
+      }
+      await streamServer.publishSession(session, operation, skipAI);
+      publishedSessions.add(session.sessionId);
     } catch (error) {
       console.error(`${colors.yellow}[ERROR]${colors.reset} Failed to publish:`, error);
     }
@@ -128,11 +139,18 @@ async function main(): Promise<void> {
 
   for (const session of recentSessions) {
     try {
-      await streamServer.publishSession(session, "insert");
+      await streamServer.publishSession(session, "insert", true);
+      publishedSessions.add(session.sessionId);
     } catch (error) {
       console.error(`${colors.yellow}[ERROR]${colors.reset} Failed to publish initial session:`, error);
     }
   }
+
+  // Allow a grace period for async file parsing to finish, then enable AI summaries
+  setTimeout(() => {
+    initialLoadComplete = true;
+    console.log(`${colors.dim}Initial load complete, AI summaries enabled${colors.reset}`);
+  }, 15_000);
 
   console.log();
   console.log(`${colors.green}✓${colors.reset} Ready - watching for changes`);
