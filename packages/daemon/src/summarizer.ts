@@ -46,7 +46,7 @@ function runClaude(prompt: string): Promise<string> {
       "--max-turns", "1",
     ], {
       stdio: ["pipe", "pipe", "pipe"],
-      timeout: 30_000,
+      timeout: 60_000,
       env,
     });
 
@@ -169,7 +169,10 @@ export async function generateAISummary(session: SessionState): Promise<string> 
     summaryCache.set(sessionId, { summary: result, hash: contentHash });
     return result;
   } catch (error) {
-    console.error("Failed to generate AI summary:", error);
+    const msg = error instanceof Error ? error.message : String(error);
+    if (!msg.includes("exited 143")) {
+      console.error("Failed to generate AI summary:", msg);
+    }
     return getFallbackSummary(session);
   }
 }
@@ -295,7 +298,11 @@ export async function generateGoal(session: SessionState): Promise<string> {
     goalCache.set(sessionId, { goal, entryCount: entries.length });
     return goal;
   } catch (error) {
-    console.error("Failed to generate goal:", error);
+    // Log at debug level — CLI failures are expected when running inside Claude
+    const msg = error instanceof Error ? error.message : String(error);
+    if (!msg.includes("exited 143")) {
+      console.error("Failed to generate goal:", msg);
+    }
     return cleanGoalText(originalPrompt);
   }
 }
