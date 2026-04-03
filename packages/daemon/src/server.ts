@@ -10,6 +10,7 @@ import type { SessionState } from "./watcher.js";
 import type { LogEntry } from "./types.js";
 import { generateAISummary, generateGoal } from "./summarizer.js";
 import { queuePRCheck, getCachedPR, setOnPRUpdate, stopAllPolling, clearPRForSession } from "./github.js";
+import { metadataStore } from "./metadata.js";
 import { log } from "./log.js";
 
 const DEFAULT_PORT = 4450;
@@ -83,7 +84,7 @@ export class StreamServer {
   /**
    * Convert SessionState to Session schema and publish to stream
    */
-  async publishSession(sessionState: SessionState, operation: "insert" | "update" | "delete"): Promise<void> {
+  async publishSession(sessionState: SessionState, operation: "insert" | "update" | "delete", skipAI = false): Promise<void> {
     if (!this.stream) {
       throw new Error("Server not started");
     }
@@ -101,11 +102,18 @@ export class StreamServer {
     // Cache session state for PR update callbacks
     this.sessionCache.set(sessionState.sessionId, sessionState);
 
-    // Generate AI goal and summary (goals are cached, summaries update more frequently)
-    const [goal, summary] = await Promise.all([
-      generateGoal(sessionState),
-      generateAISummary(sessionState),
-    ]);
+    // Generate AI goal and summary (skip for bulk initial load to avoid CLI queue bottleneck)
+    let goal: string;
+    let summary: string;
+    if (skipAI) {
+      goal = sessionState.originalPrompt.slice(0, 50);
+      summary = sessionState.status.status === "working" ? "Working..." : "Waiting for input";
+    } else {
+      [goal, summary] = await Promise.all([
+        generateGoal(sessionState),
+        generateAISummary(sessionState),
+      ]);
+    }
 
     // Get cached PR info if available (will be null if branch just changed)
     const pr = sessionState.gitBranch
@@ -136,6 +144,7 @@ export class StreamServer {
       summary,
       recentOutput: extractRecentOutput(sessionState.entries),
       pr,
+      metadata: metadataStore.get(sessionState.sessionId),
     };
 
     // Create the event using the schema helpers
@@ -184,6 +193,7 @@ export class StreamServer {
       summary,
       recentOutput: extractRecentOutput(sessionState.entries),
       pr,
+      metadata: metadataStore.get(sessionState.sessionId),
     };
 
     const event = sessionsStateSchema.sessions.update({ value: session });

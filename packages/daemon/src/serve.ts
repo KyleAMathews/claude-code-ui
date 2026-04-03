@@ -25,6 +25,7 @@ for (const envPath of envPaths) {
 import { SessionWatcher, type SessionEvent, type SessionState } from "./watcher.js";
 import { StreamServer } from "./server.js";
 import { formatStatus } from "./status.js";
+import { metadataStore } from "./metadata.js";
 
 const PORT = parseInt(process.env.PORT ?? "4450", 10);
 const MAX_AGE_HOURS = parseInt(process.env.MAX_AGE_HOURS ?? "24", 10);
@@ -62,8 +63,16 @@ async function main(): Promise<void> {
   console.log(`Stream URL: ${colors.cyan}${streamServer.getStreamUrl()}${colors.reset}`);
   console.log();
 
-  // Start the session watcher
-  const watcher = new SessionWatcher({ debounceMs: 300 });
+  // Start the session watcher (only load recent sessions to avoid OOM)
+  const watcher = new SessionWatcher({
+    debounceMs: 300,
+    maxAgeMs: MAX_AGE_MS,
+    maxEntriesPerSession: 200,
+  });
+
+  // Track initial load phase — skip AI summarization for bulk "created" events
+  let initialLoadComplete = false;
+  const publishedSessions = new Set<string>();
 
   watcher.on("session", async (event: SessionEvent) => {
     const { type, session } = event;
@@ -89,7 +98,14 @@ async function main(): Promise<void> {
     // Publish to stream
     try {
       const operation = type === "created" ? "insert" : type === "deleted" ? "delete" : "update";
-      await streamServer.publishSession(session, operation);
+      // During initial load, skip AI for new sessions (use fast fallback summaries)
+      const skipAI = !initialLoadComplete && type === "created";
+      // Avoid re-publishing sessions already in the initial batch
+      if (type === "created" && publishedSessions.has(session.sessionId)) {
+        return;
+      }
+      await streamServer.publishSession(session, operation, skipAI);
+      publishedSessions.add(session.sessionId);
     } catch (error) {
       console.error(`${colors.yellow}[ERROR]${colors.reset} Failed to publish:`, error);
     }
@@ -104,9 +120,13 @@ async function main(): Promise<void> {
     console.log();
     console.log(`${colors.dim}Shutting down...${colors.reset}`);
     watcher.stop();
+    metadataStore.stop();
     await streamServer.stop();
     process.exit(0);
   });
+
+  // Start metadata watcher
+  await metadataStore.start();
 
   // Start watching
   await watcher.start();
@@ -119,11 +139,18 @@ async function main(): Promise<void> {
 
   for (const session of recentSessions) {
     try {
-      await streamServer.publishSession(session, "insert");
+      await streamServer.publishSession(session, "insert", true);
+      publishedSessions.add(session.sessionId);
     } catch (error) {
       console.error(`${colors.yellow}[ERROR]${colors.reset} Failed to publish initial session:`, error);
     }
   }
+
+  // Allow a grace period for async file parsing to finish, then enable AI summaries
+  setTimeout(() => {
+    initialLoadComplete = true;
+    console.log(`${colors.dim}Initial load complete, AI summaries enabled${colors.reset}`);
+  }, 15_000);
 
   console.log();
   console.log(`${colors.green}✓${colors.reset} Ready - watching for changes`);

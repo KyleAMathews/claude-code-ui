@@ -16,7 +16,6 @@
     "setup": "./scripts/setup-hooks.sh"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.71.2",
     "@durable-streams/client": "^0.1.5",
     "@durable-streams/server": "^0.1.6",
     "@durable-streams/state": "^0.1.5",

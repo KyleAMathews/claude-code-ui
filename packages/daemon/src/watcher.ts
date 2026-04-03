@@ -1,6 +1,6 @@
 import { watch, type FSWatcher } from "chokidar";
 import { EventEmitter } from "node:events";
-import { readFile, unlink, readdir } from "node:fs/promises";
+import { readFile, unlink, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
   tailJSONL,
@@ -80,11 +80,15 @@ export class SessionWatcher extends EventEmitter {
   private endedSignals = new Map<string, SessionEndSignal>();
   private debounceTimers = new Map<string, NodeJS.Timeout>();
   private debounceMs: number;
+  private maxAgeMs: number;
+  private maxEntriesPerSession: number;
   private staleCheckInterval: NodeJS.Timeout | null = null;
 
-  constructor(options: { debounceMs?: number } = {}) {
+  constructor(options: { debounceMs?: number; maxAgeMs?: number; maxEntriesPerSession?: number } = {}) {
     super();
     this.debounceMs = options.debounceMs ?? 200;
+    this.maxAgeMs = options.maxAgeMs ?? 24 * 60 * 60 * 1000; // 24 hours default
+    this.maxEntriesPerSession = options.maxEntriesPerSession ?? 200;
   }
 
   /**
@@ -462,6 +466,18 @@ export class SessionWatcher extends EventEmitter {
     eventType: "add" | "change"
   ): Promise<void> {
     try {
+      // Skip files that haven't been modified within the age window
+      if (eventType === "add") {
+        try {
+          const fileStat = await stat(filepath);
+          if (Date.now() - fileStat.mtimeMs > this.maxAgeMs) {
+            return; // Too old, skip entirely
+          }
+        } catch {
+          return; // Can't stat, skip
+        }
+      }
+
       const sessionId = extractSessionId(filepath);
       const existingSession = this.sessions.get(sessionId);
 
@@ -479,10 +495,13 @@ export class SessionWatcher extends EventEmitter {
         return;
       }
 
-      // Combine with existing entries or start fresh
-      const allEntries = existingSession
+      // Combine with existing entries or start fresh, capping total size
+      let allEntries = existingSession
         ? [...existingSession.entries, ...newEntries]
         : newEntries;
+      if (allEntries.length > this.maxEntriesPerSession) {
+        allEntries = allEntries.slice(-this.maxEntriesPerSession);
+      }
 
       // Extract metadata (only needed for new sessions)
       let metadata: SessionMetadata | null;
